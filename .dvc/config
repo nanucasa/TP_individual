@@ -3,4 +3,4 @@
 ['remote "dagshub"']
     url = https://dagshub.com/nanucasa/TP_individual.dvc
 ['remote "origin"']
-    url = https://dagshub.com/nanucasa/TP_individual_dh.dvc
+    url = https://dagshub.com/nanucasa/TP_individual.dvc
