@@ -1,4 +1,6 @@
 [core]
     remote = origin
+[cache]
+    type = copy
 ['remote "origin"']
     url = https://dagshub.com/nanucasa/TP_individual.dvc
