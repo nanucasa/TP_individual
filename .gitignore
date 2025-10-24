@@ -9,10 +9,12 @@ cm_*.png
 mlflow.db
 
 # DVC
+.dvc/
 .dvc/cache/
 .dvc/tmp/
 
 # Data (el CSV lo maneja DVC)
 data/online_shoppers.csv
+
 drive/
 /data/online_shoppers.csv
