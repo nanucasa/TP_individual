@@ -2,3 +2,7 @@ mlruns/
 data/online_shoppers.csv
 .dvc/cache/
 .env
+drive/
+mlflow.db
+cm_*.png
+/data/online_shoppers.csv
