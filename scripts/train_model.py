@@ -1,94 +1,84 @@
-# dejo imports aquí porque es un archivo independiente ejecutado por Python
-import os
-import mlflow, mlflow.sklearn
-import numpy as np, pandas as pd, matplotlib.pyplot as plt
+
+import warnings; warnings.filterwarnings('ignore')
+from pathlib import Path
+import json, joblib
+import numpy as np, pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix, classification_report
+import matplotlib.pyplot as plt
+import mlflow, mlflow.sklearn
 
-RANDOM_STATE = 42
-DATA_PATH = "data/online_shoppers.csv"
-TARGET = "Revenue"
-REGISTERED_MODEL_NAME = "Cliente_Compra_Model"
+PROJ   = Path('/content/TP_individual')
+DATA   = PROJ / 'data' / 'online_shoppers.csv'
+MODELS = PROJ / 'models'
+MLRUNS = PROJ / 'mlruns'
+MODELS.mkdir(parents=True, exist_ok=True)
 
-def load_data():
-    df = pd.read_csv(DATA_PATH)
-    assert TARGET in df.columns, f"Falta columna '{TARGET}'."
-    return df
+mlflow.set_tracking_uri(f"file://{MLRUNS.as_posix()}")
+mlflow.set_experiment("Proyecto_Integrador_LMD")
 
-def build_preprocessor(df):
-    X = df.drop(columns=[TARGET])
-    cat_cols = X.select_dtypes(include=["object","bool"]).columns.tolist()
-    num_cols = [c for c in X.columns if c not in cat_cols]
-    num_pipe = Pipeline([("imputer", SimpleImputer(strategy="median"))])
-    cat_pipe = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")),
-                         ("ohe", OneHotEncoder(handle_unknown="ignore"))])
-    return ColumnTransformer([("num", num_pipe, num_cols), ("cat", cat_pipe, cat_cols)])
+df = pd.read_csv(DATA)
+y = df['Revenue'].astype(int)
+X = df.drop(columns=['Revenue'])
 
-def plot_cm(y_true, y_pred, title):
-    cm = confusion_matrix(y_true, y_pred)
-    import matplotlib.pyplot as plt
-    import numpy as np
-    fig, ax = plt.subplots(figsize=(4,4))
-    ax.imshow(cm, interpolation='nearest')
-    ax.set_title(title); ax.set_xlabel("Predicho"); ax.set_ylabel("Real")
-    for (i,j), v in np.ndenumerate(cm): ax.text(j,i,int(v),ha='center',va='center')
-    fig.tight_layout(); return fig
+num_cols = X.select_dtypes(include=['int64','int32','float64','float32']).columns.tolist()
+cat_cols = [c for c in X.columns if c not in num_cols]
 
-def eval_and_log(y_true, y_proba, y_pred):
-    acc = accuracy_score(y_true, y_pred)
-    f1  = f1_score(y_true, y_pred)
-    try: auc = roc_auc_score(y_true, y_proba)
-    except Exception: auc = float("nan")
-    mlflow.log_metric("accuracy", acc)
-    mlflow.log_metric("f1", f1)
-    mlflow.log_metric("roc_auc", auc)
-    return {"accuracy":acc, "f1":f1, "roc_auc":auc}
+pre = ColumnTransformer([
+    ('num', StandardScaler(), num_cols),
+    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_cols)
+])
 
-def run_child(name, model, pre, Xtr, Xte, ytr, yte):
-    with mlflow.start_run(run_name=name, nested=True) as child:
-        pipe = Pipeline([("pre", pre), ("clf", model)])
-        pipe.fit(Xtr, ytr)
-        y_pred  = pipe.predict(Xte)
-        y_proba = pipe.predict_proba(Xte)[:,1] if hasattr(pipe,"predict_proba") else y_pred.astype(float)
-        metrics = eval_and_log(yte, y_proba, y_pred)
-        fig = plot_cm(yte, y_pred, f"CM - {name}"); pth=f"cm_{name}.png"; fig.savefig(pth); plt.close(fig)
-        mlflow.log_artifact(pth)
-        mlflow.sklearn.log_model(pipe, artifact_path="model")
-        return child.info.run_id, metrics
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
-def main():
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
-    df = load_data()
-    X, y = df.drop(columns=[TARGET]), df[TARGET].astype(int)
-    pre = build_preprocessor(df)
-    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y)
+def fit_eval(model, name):
+    with mlflow.start_run(run_name=name, nested=True):
+        pipe = Pipeline([('pre', pre), ('clf', model)])
+        pipe.fit(X_train, y_train)
+        y_pred = pipe.predict(X_test)
+        y_proba = pipe.predict_proba(X_test)[:,1] if hasattr(pipe, "predict_proba") else None
 
-    with mlflow.start_run(run_name="parent_run"):
-        mlflow.log_param("random_state", RANDOM_STATE)
-        mlflow.log_param("test_size", 0.2)
+        acc = accuracy_score(y_test, y_pred)
+        f1  = f1_score(y_test, y_pred)
+        roc = roc_auc_score(y_test, y_proba) if y_proba is not None else float('nan')
+        mlflow.log_metrics({'accuracy': acc, 'f1': f1, 'roc_auc': roc})
 
-        rf = RandomForestClassifier(n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1)
-        lr = LogisticRegression(max_iter=1000, solver="liblinear")
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(); plt.imshow(cm); plt.title(f'CM - {name}'); plt.colorbar()
+        for i in range(2):
+            for j in range(2):
+                plt.text(j, i, cm[i,j], ha='center', va='center')
+        plt.tight_layout()
+        cm_path = MODELS / f"cm_{name}.png"
+        plt.savefig(cm_path, bbox_inches='tight', dpi=120); plt.close()
+        mlflow.log_artifact(str(cm_path), artifact_path='figures')
 
-        runs = []
-        for name, mdl in [("RandomForest", rf), ("LogisticRegression", lr)]:
-            rid, mets = run_child(name, mdl, pre, Xtr, Xte, ytr, yte)
-            runs.append((name, rid, mets))
+        rep = classification_report(y_test, y_pred)
+        rep_path = MODELS / f"report_{name}.txt"
+        rep_path.write_text(rep, encoding='utf-8')
+        mlflow.log_artifact(str(rep_path), artifact_path='reports')
 
-        runs.sort(key=lambda x: x[2]["roc_auc"], reverse=True)
-        best_name, best_run_id, best_metrics = runs[0]
-        mlflow.log_param("best_model", best_name)
-        print("Mejor:", best_name, "run_id:", best_run_id, "metrics:", best_metrics)
+        mlflow.sklearn.log_model(pipe, artifact_path='model')
+        joblib.dump(pipe, MODELS / f"{name}.joblib")
 
-        mv = mlflow.register_model(model_uri=f"runs:/{best_run_id}/model",
-                                   name=REGISTERED_MODEL_NAME)
-        print("Registrado en Model Registry:", REGISTERED_MODEL_NAME, "→ versión:", mv.version)
+        return mlflow.active_run().info.run_id, acc, f1, roc
 
-if __name__ == "__main__":
-    main()
+with mlflow.start_run(run_name="Padre"):
+    rf = RandomForestClassifier(n_estimators=300, random_state=42, class_weight='balanced', n_jobs=-1)
+    rf_run, rf_acc, rf_f1, rf_roc = fit_eval(rf, "RandomForest")
+
+    lr = LogisticRegression(max_iter=1000)
+    lr_run, lr_acc, lr_f1, lr_roc = fit_eval(lr, "LogisticRegression")
+
+    resumen = {
+        'RandomForest': {'run_id': rf_run, 'roc_auc': rf_roc},
+        'LogisticRegression': {'run_id': lr_run, 'roc_auc': lr_roc}
+    }
+    print(json.dumps(resumen, indent=2))

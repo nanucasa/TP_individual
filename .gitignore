@@ -1,9 +1,17 @@
-mlruns/
-data/online_shoppers.csv
-.dvc/cache/
-.env
-drive/
-mlflow.db
-cm_*.png
-/data/online_shoppers.csv
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
 
+mlruns/
+models/*.joblib
+models/*.pkl
+cm_*.png
+mlflow.db
+
+# DVC
+.dvc/
+.dvc/cache/
+.dvc/tmp/
+
+# Data (el CSV lo maneja DVC)
+data/online_shoppers.csv
