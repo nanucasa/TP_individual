@@ -15,3 +15,6 @@ mlflow.db
 
 # Data (el CSV lo maneja DVC)
 data/online_shoppers.csv
+
+drive/
+/data/online_shoppers.csv
